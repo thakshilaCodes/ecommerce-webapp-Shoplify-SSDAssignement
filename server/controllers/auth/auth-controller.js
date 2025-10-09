@@ -63,11 +63,12 @@ const loginUser = async (req, res) => {
       });
     }
 
-    // Check if user registered with Google OAuth (no password)
-    if (checkUser.googleId && !checkUser.password) {
+    // Check if user registered with OAuth (no password)
+    if ((checkUser.googleId || checkUser.facebookId) && !checkUser.password) {
+      let provider = checkUser.googleId ? "Google" : "Facebook";
       return res.status(400).json({
         success: false,
-        message: "This account uses Google Sign-In. Please sign in with Google.",
+        message: `This account uses ${provider} Sign-In. Please sign in with ${provider}.`,
       });
     }
 
@@ -106,22 +107,37 @@ const loginUser = async (req, res) => {
 // Google OAuth Callback
 const googleAuthCallback = async (req, res) => {
   try {
-    // req.user contains the user from Passport
     const user = req.user;
-    
     const token = generateToken(user);
 
-    // Redirect to frontend with token as query parameter or set cookie
     res.cookie("token", token, { 
       httpOnly: true, 
       secure: false,
       maxAge: 60 * 60 * 1000 // 1 hour
     });
 
-    // Redirect to frontend
     res.redirect("http://localhost:5173");
   } catch (error) {
     console.error("Google OAuth callback error:", error);
+    res.redirect("http://localhost:5173/login?error=auth_failed");
+  }
+};
+
+// Facebook OAuth Callback
+const facebookAuthCallback = async (req, res) => {
+  try {
+    const user = req.user;
+    const token = generateToken(user);
+
+    res.cookie("token", token, { 
+      httpOnly: true, 
+      secure: false,
+      maxAge: 60 * 60 * 1000 // 1 hour
+    });
+
+    res.redirect("http://localhost:5173");
+  } catch (error) {
+    console.error("Facebook OAuth callback error:", error);
     res.redirect("http://localhost:5173/login?error=auth_failed");
   }
 };
@@ -162,7 +178,6 @@ const authMiddleware = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || "CLIENT_SECRET_KEY");
     
-    // Fetch fresh user data from database
     const user = await User.findById(decoded.id).select("-password");
     if (!user) {
       return res.status(401).json({
@@ -187,5 +202,6 @@ module.exports = {
   logoutUser,
   authMiddleware,
   googleAuthCallback,
+  facebookAuthCallback,
   getCurrentUser
 };

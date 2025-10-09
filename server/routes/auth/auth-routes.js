@@ -6,6 +6,7 @@ const {
   logoutUser,
   authMiddleware,
   googleAuthCallback,
+  facebookAuthCallback,
   getCurrentUser,
 } = require("../../controllers/auth/auth-controller");
 
@@ -28,9 +29,26 @@ router.get(
   "/google/callback",
   passport.authenticate("google", {
     failureRedirect: "http://localhost:5173/login?error=auth_failed",
-    session: false, // We're using JWT, not sessions
+    session: false,
   }),
   googleAuthCallback
+);
+
+// Facebook OAuth routes
+router.get(
+  "/facebook",
+  passport.authenticate("facebook", {
+    scope: ["email"],
+  })
+);
+
+router.get(
+  "/facebook/callback",
+  passport.authenticate("facebook", {
+    failureRedirect: "http://localhost:5173/login?error=auth_failed",
+    session: false,
+  }),
+  facebookAuthCallback
 );
 
 // Auth check route

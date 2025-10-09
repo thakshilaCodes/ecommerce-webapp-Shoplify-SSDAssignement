@@ -13,7 +13,7 @@ const UserSchema = new mongoose.Schema({
     type: String,
     // Make password optional for OAuth users
     required: function() {
-      return !this.googleId; // Required only if not using Google OAuth
+      return !this.googleId && !this.facebookId; // Required only if not using OAuth
     }
   },
   role: {
@@ -22,8 +22,11 @@ const UserSchema = new mongoose.Schema({
   },
   googleId: {
     type: String,
-    sparse: true, // Allows multiple null values
-    unique: true
+    sparse: true,
+  },
+  facebookId: {
+    type: String,
+    sparse: true,
   },
   profilePicture: {
     type: String,
