@@ -20,12 +20,61 @@ function ProductImageUpload({
 
   console.log(isEditMode, "isEditMode");
 
+  // SECURITY: Validate file type and size before accepting
+  // WHY: Prevents malicious file uploads and client-side attacks
+  // HOW: Check MIME type and file size before setting state
+  const validateFile = (file) => {
+    if (!file) return false;
+
+    // Allowed file types
+    const allowedTypes = [
+      'image/jpeg',
+      'image/jpg', 
+      'image/png',
+      'image/gif',
+      'image/webp'
+    ];
+    
+    // Check file type
+    if (!allowedTypes.includes(file.type)) {
+      alert('Invalid file type. Please upload only JPEG, PNG, GIF, or WebP images.');
+      return false;
+    }
+
+    // Check file size (max 5MB)
+    const maxSize = 5 * 1024 * 1024; // 5MB in bytes
+    if (file.size > maxSize) {
+      alert('File size too large. Maximum size is 5MB.');
+      return false;
+    }
+
+    // SECURITY: Validate filename to prevent injection
+    // WHY: Malicious filenames can cause issues on server
+    // HOW: Basic filename sanitization
+    const sanitizedName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    if (sanitizedName !== file.name) {
+      console.warn('Filename contained unsafe characters and was sanitized');
+    }
+
+    return true;
+  };
+
   function handleImageFileChange(event) {
     console.log(event.target.files, "event.target.files");
     const selectedFile = event.target.files?.[0];
     console.log(selectedFile);
 
-    if (selectedFile) setImageFile(selectedFile);
+    // SECURITY: Validate file before setting state
+    // WHY: Prevents processing of malicious files
+    // HOW: Use validation function before accepting file
+    if (selectedFile && validateFile(selectedFile)) {
+      setImageFile(selectedFile);
+    } else {
+      // Reset input if file is invalid
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
+    }
   }
 
   function handleDragOver(event) {
@@ -35,7 +84,13 @@ function ProductImageUpload({
   function handleDrop(event) {
     event.preventDefault();
     const droppedFile = event.dataTransfer.files?.[0];
-    if (droppedFile) setImageFile(droppedFile);
+    
+    // SECURITY: Validate dropped files too
+    // WHY: Drag-and-drop can also be used to upload malicious files
+    // HOW: Apply same validation to dropped files
+    if (droppedFile && validateFile(droppedFile)) {
+      setImageFile(droppedFile);
+    }
   }
 
   function handleRemoveImage() {
@@ -46,23 +101,90 @@ function ProductImageUpload({
   }
 
   async function uploadImageToCloudinary() {
-    setImageLoadingState(true);
-    const data = new FormData();
-    data.append("my_file", imageFile);
-    const response = await axios.post(
-      "http://localhost:5000/api/admin/products/upload-image",
-      data
-    );
-    console.log(response, "response");
+    // SECURITY: Additional validation before upload
+    // WHY: Double-check security before sending to server
+    // HOW: Re-validate file before upload request
+    if (!imageFile || !validateFile(imageFile)) {
+      alert('Invalid file. Please select a valid image.');
+      return;
+    }
 
-    if (response?.data?.success) {
-      setUploadedImageUrl(response.data.result.url);
+    setImageLoadingState(true);
+    
+    try {
+      const data = new FormData();
+      
+      // SECURITY: Use sanitized filename in FormData
+      // WHY: Prevents filename-based injection attacks
+      // HOW: Sanitize filename before appending to FormData
+      const sanitizedFileName = imageFile.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      data.append("my_file", imageFile, sanitizedFileName);
+
+      // SECURITY: Use environment variable for API URL
+      // WHY: Hardcoded URLs can cause issues in different environments
+      // HOW: Use environment variable with fallback
+      const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+      
+      const response = await axios.post(
+        `${API_BASE_URL}/api/admin/products/upload-image`,
+        data,
+        {
+          // SECURITY: Add timeout to prevent hanging requests
+          // WHY: Prevents denial-of-service from slow requests
+          // HOW: Set reasonable timeout
+          timeout: 30000, // 30 seconds
+          
+          // SECURITY: Add request headers for security
+          // WHY: Additional security headers can help prevent attacks
+          headers: {
+            'Content-Type': 'multipart/form-data',
+            'X-Requested-With': 'XMLHttpRequest'
+          }
+        }
+      );
+      
+      console.log(response, "response");
+
+      if (response?.data?.success) {
+        setUploadedImageUrl(response.data.result.url);
+        setImageLoadingState(false);
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (error) {
+      // SECURITY: Proper error handling without exposing details
+      // WHY: Prevents information leakage to users
+      // HOW: Generic error messages
+      console.error('Upload error:', error);
+      
+      let errorMessage = 'Failed to upload image. Please try again.';
+      
+      if (error.code === 'ECONNABORTED') {
+        errorMessage = 'Upload timeout. Please try again.';
+      } else if (error.response?.status === 413) {
+        errorMessage = 'File too large. Please select a smaller image.';
+      } else if (error.response?.status >= 500) {
+        errorMessage = 'Server error. Please try again later.';
+      }
+      
+      alert(errorMessage);
       setImageLoadingState(false);
+      
+      // Reset on error
+      handleRemoveImage();
     }
   }
 
   useEffect(() => {
-    if (imageFile !== null) uploadImageToCloudinary();
+    // SECURITY: Add cleanup and validation in useEffect
+    // WHY: Prevent memory leaks and ensure valid state
+    // HOW: Check if imageFile exists and is valid before upload
+    if (imageFile !== null && validateFile(imageFile)) {
+      uploadImageToCloudinary();
+    } else if (imageFile !== null) {
+      // If file is invalid, remove it
+      handleRemoveImage();
+    }
   }, [imageFile]);
 
   return (
@@ -84,6 +206,10 @@ function ProductImageUpload({
           ref={inputRef}
           onChange={handleImageFileChange}
           disabled={isEditMode}
+          // SECURITY: Add accept attribute for browser-level validation
+          // WHY: Provides first line of defense against wrong file types
+          // HOW: Specify allowed file types
+          accept=".jpg,.jpeg,.png,.gif,.webp,image/jpeg,image/png,image/gif,image/webp"
         />
         {!imageFile ? (
           <Label
@@ -94,6 +220,9 @@ function ProductImageUpload({
           >
             <UploadCloudIcon className="w-10 h-10 text-muted-foreground mb-2" />
             <span>Drag & drop or click to upload image</span>
+            <span className="text-sm text-muted-foreground mt-1">
+              Supported: JPEG, PNG, GIF, WebP (Max 5MB)
+            </span>
           </Label>
         ) : imageLoadingState ? (
           <Skeleton className="h-10 bg-gray-100" />
@@ -102,7 +231,9 @@ function ProductImageUpload({
             <div className="flex items-center">
               <FileIcon className="w-8 text-primary mr-2 h-8" />
             </div>
-            <p className="text-sm font-medium">{imageFile.name}</p>
+            <p className="text-sm font-medium truncate max-w-xs">
+              {imageFile.name}
+            </p>
             <Button
               variant="ghost"
               size="icon"

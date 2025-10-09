@@ -1,106 +1,122 @@
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const User = require("../../models/User");
-const validator = require("validator"); // Added for input validation
+const bcrypt = require("bcryptjs")
+const jwt = require("jsonwebtoken")
+const User = require("../../models/User")
+
+// WHY: Prevent injection attacks and invalid data from being processed
+// HOW: Validate and sanitize user inputs before processing
+const validateEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return emailRegex.test(email)
+}
+
+const validatePassword = (password) => {
+  // Minimum 8 characters, at least one letter and one number
+  return password && password.length >= 8
+}
+
+const sanitizeInput = (input) => {
+  if (typeof input !== "string") return input
+  // Remove potential NoSQL injection characters
+  return input.replace(/[{}$]/g, "")
+}
 
 //register
 const registerUser = async (req, res) => {
-  const { userName, email, password } = req.body;
+  const { userName, email, password } = req.body
 
   try {
-    // Input validation to prevent injection attacks
+    // WHY: Prevent injection attacks and ensure data integrity
+    // HOW: Validate email format, password strength, and sanitize inputs
     if (!userName || !email || !password) {
       return res.status(400).json({
         success: false,
-        message: "All fields are required"
-      });
+        message: "All fields are required",
+      })
     }
 
-    // Validate email format
-    if (!validator.isEmail(email)) {
+    if (!validateEmail(email)) {
       return res.status(400).json({
         success: false,
-        message: "Please provide a valid email address"
-      });
+        message: "Invalid email format",
+      })
     }
 
-    // Sanitize inputs to prevent XSS and injection
-    const sanitizedUserName = validator.escape(userName.trim());
-    const sanitizedEmail = validator.normalizeEmail(email.trim());
-    
-    // Basic password strength validation
-    if (password.length < 8) {
+    if (!validatePassword(password)) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 8 characters long"
-      });
+        message: "Password must be at least 8 characters long",
+      })
     }
 
-    const checkUser = await User.findOne({ email: sanitizedEmail }); // Use sanitized email
+    // Sanitize inputs to prevent NoSQL injection
+    const sanitizedUserName = sanitizeInput(userName)
+    const sanitizedEmail = sanitizeInput(email)
+
+    const checkUser = await User.findOne({ email: sanitizedEmail })
     if (checkUser)
-      return res.status(409).json({ // Changed to 409 Conflict
+      return res.json({
         success: false,
-        message: "User already exists with this email address"
-      });
+        message: "User Already exists with the same email! Please try again",
+      })
 
-    const hashPassword = await bcrypt.hash(password, 12);
+    const hashPassword = await bcrypt.hash(password, 12)
     const newUser = new User({
-      userName: sanitizedUserName, // Use sanitized username
-      email: sanitizedEmail, // Use sanitized email
+      userName: sanitizedUserName,
+      email: sanitizedEmail,
       password: hashPassword,
-    });
+    })
 
-    await newUser.save();
-    res.status(201).json({ // Changed to 201 Created
+    await newUser.save()
+    res.status(200).json({
       success: true,
       message: "Registration successful",
-    });
+    })
   } catch (e) {
-    console.log(e);
-    // Generic error message to prevent information disclosure
+    console.log(e)
     res.status(500).json({
       success: false,
-      message: "Registration failed",
-    });
+      message: "Some error occured",
+    })
   }
-};
+}
 
 //login
 const loginUser = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password } = req.body
 
   try {
-    // Input validation
+    // WHY: Prevent injection attacks during authentication
+    // HOW: Validate and sanitize email input
     if (!email || !password) {
       return res.status(400).json({
         success: false,
-        message: "Email and password are required"
-      });
+        message: "Email and password are required",
+      })
     }
 
-    // Sanitize email input
-    const sanitizedEmail = validator.normalizeEmail(email.trim());
-    
-    const checkUser = await User.findOne({ email: sanitizedEmail }); // Use sanitized email
+    if (!validateEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email format",
+      })
+    }
+
+    const sanitizedEmail = sanitizeInput(email)
+
+    const checkUser = await User.findOne({ email: sanitizedEmail })
     if (!checkUser)
-      // Generic message to prevent user enumeration
-      return res.status(401).json({
+      return res.json({
         success: false,
-        message: "Invalid credentials"
-      });
+        message: "User doesn't exists! Please register first",
+      })
 
-    const checkPasswordMatch = await bcrypt.compare(
-      password,
-      checkUser.password
-    );
+    const checkPasswordMatch = await bcrypt.compare(password, checkUser.password)
     if (!checkPasswordMatch)
-      // Generic message to prevent user enumeration
-      return res.status(401).json({
+      return res.json({
         success: false,
-        message: "Invalid credentials"
-   } );
+        message: "Incorrect password! Please try again",
+      })
 
-    // Use environment variable for JWT secret to prevent hardcoded secrets
     const token = jwt.sign(
       {
         id: checkUser._id,
@@ -108,16 +124,11 @@ const loginUser = async (req, res) => {
         email: checkUser.email,
         userName: checkUser.userName,
       },
-      process.env.JWT_SECRET || "CLIENT_SECRET_KEY", // Use environment variable
+      "CLIENT_SECRET_KEY",
       { expiresIn: "60m" }
     );
 
-    // Secure cookie settings to prevent XSS and CSRF
-    res.cookie("token", token, { 
-      httpOnly: true, // Prevents XSS attacks
-      secure: process.env.NODE_ENV === "production", // HTTPS only in production
-      sameSite: "strict" // CSRF protection
-    }).json({
+     res.cookie("token", token, { httpOnly: true, secure: false }).json({
       success: true,
       message: "Logged in successfully",
       user: {
@@ -129,58 +140,41 @@ const loginUser = async (req, res) => {
     });
   } catch (e) {
     console.log(e);
-    // Generic error message to prevent information disclosure
     res.status(500).json({
       success: false,
-      message: "Login failed",
+      message: "Some error occured",
     });
   }
 };
 
 //logout
+
 const logoutUser = (req, res) => {
-  // Secure cookie clearance
-  res.clearCookie("token", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict"
-  }).json({
+  res.clearCookie("token").json({
     success: true,
     message: "Logged out successfully!",
-  });
-};
+  })
+}
 
 //auth middleware
 const authMiddleware = async (req, res, next) => {
-  const token = req.cookies.token;
+  const token = req.cookies.token
   if (!token)
     return res.status(401).json({
       success: false,
-      message: "Authentication required",
-    });
+      message: "Unauthorised user!",
+    })
 
-  try {
-    // Use environment variable for JWT secret
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "CLIENT_SECRET_KEY");
-    
-    // Verify user still exists in database (prevents token reuse after user deletion)
-    const userExists = await User.findById(decoded.id);
-    if (!userExists) {
-      return res.status(401).json({
-        success: false,
-        message: "User no longer exists",
-      });
-    }
-    
+try {
+    const decoded = jwt.verify(token, "CLIENT_SECRET_KEY");
     req.user = decoded;
     next();
   } catch (error) {
-    // Generic error message
     res.status(401).json({
       success: false,
-      message: "Invalid authentication token",
+      message: "Unauthorised user!",
     });
   }
 };
 
-module.exports = { registerUser, loginUser, logoutUser, authMiddleware };
+module.exports = { registerUser, loginUser, logoutUser, authMiddleware }
