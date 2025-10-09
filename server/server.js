@@ -2,6 +2,8 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
+const passport = require("./config/passport"); // Add this line
+
 const authRouter = require("./routes/auth/auth-routes");
 const adminProductsRouter = require("./routes/admin/products-routes");
 const adminOrderRouter = require("./routes/admin/order-routes");
@@ -15,7 +17,9 @@ const shopReviewRouter = require("./routes/shop/review-routes");
 
 const commonFeatureRouter = require("./routes/common/feature-routes");
 
-//mongodb+srv://thakshilafonseka2002:LHkyYBaSwXbNUzVb@cluster0.jal2xrl.mongodb.net/
+// Load environment variables (create a .env file)
+require('dotenv').config();
+
 mongoose
   .connect("mongodb+srv://thakshilafonseka2002:LHkyYBaSwXbNUzVb@cluster0.jal2xrl.mongodb.net/")
   .then(() => console.log("MongoDB connected"))
@@ -23,6 +27,9 @@ mongoose
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Initialize Passport
+app.use(passport.initialize()); // Add this line
 
 app.use(
   cors({
