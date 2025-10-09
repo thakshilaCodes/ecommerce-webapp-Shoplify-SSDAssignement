@@ -34,7 +34,7 @@ const ProductReviewSchema = new mongoose.Schema(
       type: Number,
       required: [true, "Review value is required"],
       min: 1,
-      max: 2,
+      max: 5,
     },
   },
   { timestamps: true }

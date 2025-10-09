@@ -1,17 +1,13 @@
-const mongoose = require("mongoose")
+const mongoose = require("mongoose");
 
 // SECURITY: Enhanced schema with validation and type safety
-// WHY: Schema-level validation provides defense in depth
-// HOW: Define strict types, required fields, and length constraints
 const AddressSchema = new mongoose.Schema(
   {
-    // SECURITY: Use ObjectId reference for userId
-    // WHY: Ensures referential integrity and prevents injection
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: [true, "User ID is required"],
-      index: true, // Index for faster queries
+      index: true,
     },
     address: {
       type: String,
@@ -31,15 +27,13 @@ const AddressSchema = new mongoose.Schema(
       type: String,
       required: [true, "Pincode is required"],
       trim: true,
-      minlength: [4, "Pincode must be at least 4 characters"],
-      maxlength: [10, "Pincode must not exceed 10 characters"],
+      match: [/^[0-9]{4,10}$/, "Pincode must be 4-10 digits"],
     },
     phone: {
       type: String,
       required: [true, "Phone number is required"],
       trim: true,
-      minlength: [10, "Phone number must be at least 10 characters"],
-      maxlength: [20, "Phone number must not exceed 20 characters"],
+      match: [/^[0-9+\-\s()]{10,20}$/, "Invalid phone number format"],
     },
     notes: {
       type: String,
@@ -50,18 +44,16 @@ const AddressSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    // SECURITY: Prevent returning sensitive internal fields
     toJSON: {
       transform: (doc, ret) => {
-        delete ret.__v
-        return ret
+        delete ret.__v;
+        return ret;
       },
     },
-  },
-)
+  }
+);
 
-// SECURITY: Add compound index for efficient and secure queries
-// WHY: Improves query performance and ensures userId is always used in lookups
-AddressSchema.index({ userId: 1, _id: 1 })
+// SECURITY: Compound index to ensure efficient queries and prevent unauthorized access
+AddressSchema.index({ userId: 1, _id: 1 });
 
-module.exports = mongoose.model("Address", AddressSchema)
+module.exports = mongoose.model("Address", AddressSchema);
