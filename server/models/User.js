@@ -19,6 +19,14 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: "user",
   },
+  failedLoginAttempts: {
+    type: Number,
+    default: 0,
+  },
+  lockoutUntil: {
+    type: Date,
+    default: null,
+  },
 });
 
 const User = mongoose.model("User", UserSchema);
