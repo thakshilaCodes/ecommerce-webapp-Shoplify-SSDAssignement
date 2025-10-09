@@ -2,8 +2,12 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
-const passport = require("./config/passport"); // Add this line
 
+// Load environment variables FIRST before any other imports
+require('dotenv').config();
+
+// Now import other modules
+const passport = require("./config/passport");
 const authRouter = require("./routes/auth/auth-routes");
 const adminProductsRouter = require("./routes/admin/products-routes");
 const adminOrderRouter = require("./routes/admin/order-routes");
@@ -17,8 +21,9 @@ const shopReviewRouter = require("./routes/shop/review-routes");
 
 const commonFeatureRouter = require("./routes/common/feature-routes");
 
-// Load environment variables (create a .env file)
-require('dotenv').config();
+// Debug: Check if environment variables are loaded
+console.log("Google Client ID:", process.env.GOOGLE_CLIENT_ID ? "Loaded" : "Missing");
+console.log("Google Client Secret:", process.env.GOOGLE_CLIENT_SECRET ? "Loaded" : "Missing");
 
 mongoose
   .connect("mongodb+srv://thakshilafonseka2002:LHkyYBaSwXbNUzVb@cluster0.jal2xrl.mongodb.net/")
@@ -29,7 +34,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Initialize Passport
-app.use(passport.initialize()); // Add this line
+app.use(passport.initialize());
 
 app.use(
   cors({
