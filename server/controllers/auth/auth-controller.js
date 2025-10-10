@@ -22,6 +22,13 @@ const sanitizeInput = (input) => {
   return input.replace(/[{}$]/g, "");
 };
 
+// Password complexity check helper
+// At least 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char
+const isPasswordComplex = (password) => {
+  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
+  return regex.test(password);
+};
+
 // Get JWT secret from environment
 const getJwtSecret = () => {
   if (!process.env.JWT_SECRET) {
@@ -75,10 +82,10 @@ const registerUser = async (req, res) => {
       minUppercase: 1,
       minNumbers: 1,
       minSymbols: 1
-    })) {
+    }) || !isPasswordComplex(password)) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 8 characters and include uppercase, lowercase, number, and symbol."
+        message: "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
       });
     }
 
@@ -118,6 +125,9 @@ const registerUser = async (req, res) => {
 // =========================
 // Login User
 // =========================
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_TIME = 15 * 60 * 1000; // 15 minutes
+
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
@@ -148,6 +158,14 @@ const loginUser = async (req, res) => {
       });
     }
 
+    // Check for lockout
+    if (checkUser.lockoutUntil && checkUser.lockoutUntil > Date.now()) {
+      return res.json({
+        success: false,
+        message: `Account locked. Try again after ${new Date(checkUser.lockoutUntil).toLocaleTimeString()}`,
+      });
+    }
+
     if (isLocked(sanitizedEmail)) {
       console.log(`[AUDIT] Account locked due to failed logins: ${sanitizedEmail}`);
       return res.status(403).json({
@@ -168,6 +186,11 @@ const loginUser = async (req, res) => {
     const checkPasswordMatch = await bcrypt.compare(password, checkUser.password);
     if (!checkPasswordMatch) {
       recordFailedLogin(sanitizedEmail);
+      checkUser.failedLoginAttempts = (checkUser.failedLoginAttempts || 0) + 1;
+      if (checkUser.failedLoginAttempts >= MAX_FAILED_ATTEMPTS) {
+        checkUser.lockoutUntil = Date.now() + LOCKOUT_TIME;
+      }
+      await checkUser.save();
       console.log(`[AUDIT] Failed login (bad password) for: ${sanitizedEmail}`);
       return res.status(400).json({
         success: false,
@@ -175,6 +198,10 @@ const loginUser = async (req, res) => {
       });
     }
 
+    // Reset failed attempts on successful login
+    checkUser.failedLoginAttempts = 0;
+    checkUser.lockoutUntil = null;
+    await checkUser.save();
     resetFailedLogins(sanitizedEmail);
 
     const token = generateToken(checkUser);
