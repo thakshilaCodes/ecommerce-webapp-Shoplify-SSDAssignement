@@ -9,13 +9,16 @@ const {
 } = require("../../controllers/admin/products-controller");
 
 const { upload } = require("../../helpers/cloudinary");
+const { adminOnly } = require("../../middleware/roleCheck");
+const { authMiddleware } = require("../../controllers/auth/auth-controller");
 
 const router = express.Router();
 
-router.post("/upload-image", upload.single("my_file"), handleImageUpload);
-router.post("/add", addProduct);
-router.put("/edit/:id", editProduct);
-router.delete("/delete/:id", deleteProduct);
-router.get("/get", fetchAllProducts);
+// All admin routes require authentication and admin role
+router.post("/upload-image", authMiddleware, adminOnly, upload.single("my_file"), handleImageUpload);
+router.post("/add", authMiddleware, adminOnly, addProduct);
+router.put("/edit/:id", authMiddleware, adminOnly, editProduct);
+router.delete("/delete/:id", authMiddleware, adminOnly, deleteProduct);
+router.get("/get", authMiddleware, adminOnly, fetchAllProducts);
 
 module.exports = router;
