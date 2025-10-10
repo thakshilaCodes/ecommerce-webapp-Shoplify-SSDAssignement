@@ -5,8 +5,31 @@ const User = require("../../models/User");
 const { recordFailedLogin, isLocked, resetFailedLogins } = require("../../middleware/loginLockout");
 const { blacklistToken, isTokenBlacklisted } = require("../../middleware/jwtBlacklist");
 
+// =========================
+// Helper functions
+// =========================
 
-// Helper function to generate JWT token
+// WHY: Prevent injection attacks and invalid data from being processed
+// HOW: Validate and sanitize user inputs before processing
+const validateEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+};
+
+const sanitizeInput = (input) => {
+  if (typeof input !== "string") return input;
+  // Remove potential NoSQL injection characters
+  return input.replace(/[{}$]/g, "");
+};
+
+// Password complexity check helper
+// At least 8 chars, 1 uppercase, 1 lowercase, 1 digit, 1 special char
+const isPasswordComplex = (password) => {
+  const regex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
+  return regex.test(password);
+};
+
+// Get JWT secret from environment
 const getJwtSecret = () => {
   if (!process.env.JWT_SECRET) {
     throw new Error("FATAL: JWT_SECRET environment variable is not set.");
@@ -14,6 +37,7 @@ const getJwtSecret = () => {
   return process.env.JWT_SECRET;
 };
 
+// Generate JWT token
 const generateToken = (user) => {
   // Short expiry for access token (15m)
   return jwt.sign(
@@ -28,26 +52,48 @@ const generateToken = (user) => {
   );
 };
 
-// Register
+// =========================
+// Register User
+// =========================
 const registerUser = async (req, res) => {
   const { userName, email, password } = req.body;
 
   try {
-    // Password strength validation
+    // WHY: Prevent injection attacks and ensure data integrity
+    // HOW: Validate email format, password strength, and sanitize inputs
+    if (!userName || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required",
+      });
+    }
+
+    if (!validateEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email format",
+      });
+    }
+
+    // Password strength validation (strong password required)
     if (!validator.isStrongPassword(password, {
       minLength: 8,
       minLowercase: 1,
       minUppercase: 1,
       minNumbers: 1,
       minSymbols: 1
-    })) {
+    }) || !isPasswordComplex(password)) {
       return res.status(400).json({
         success: false,
-        message: "Password must be at least 8 characters and include uppercase, lowercase, number, and symbol."
+        message: "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
       });
     }
 
-    const checkUser = await User.findOne({ email });
+    // Sanitize inputs to prevent NoSQL injection
+    const sanitizedUserName = sanitizeInput(userName);
+    const sanitizedEmail = sanitizeInput(email);
+
+    const checkUser = await User.findOne({ email: sanitizedEmail });
     if (checkUser) {
       return res.status(400).json({
         success: false,
@@ -57,8 +103,8 @@ const registerUser = async (req, res) => {
 
     const hashPassword = await bcrypt.hash(password, 12);
     const newUser = new User({
-      userName,
-      email,
+      userName: sanitizedUserName,
+      email: sanitizedEmail,
       password: hashPassword,
     });
 
@@ -76,23 +122,52 @@ const registerUser = async (req, res) => {
   }
 };
 
-// Login
+// =========================
+// Login User
+// =========================
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_TIME = 15 * 60 * 1000; // 15 minutes
+
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const checkUser = await User.findOne({ email });
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    if (!validateEmail(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email format",
+      });
+    }
+
+    const sanitizedEmail = sanitizeInput(email);
+    const checkUser = await User.findOne({ email: sanitizedEmail });
+
     if (!checkUser) {
-      recordFailedLogin(email);
-      console.log(`[AUDIT] Failed login for non-existent user: ${email}`);
+      recordFailedLogin(sanitizedEmail);
+      console.log(`[AUDIT] Failed login for non-existent user: ${sanitizedEmail}`);
       return res.status(400).json({
         success: false,
         message: "User doesn't exist! Please register first",
       });
     }
 
-    if (isLocked(email)) {
-      console.log(`[AUDIT] Account locked due to failed logins: ${email}`);
+    // Check for lockout
+    if (checkUser.lockoutUntil && checkUser.lockoutUntil > Date.now()) {
+      return res.json({
+        success: false,
+        message: `Account locked. Try again after ${new Date(checkUser.lockoutUntil).toLocaleTimeString()}`,
+      });
+    }
+
+    if (isLocked(sanitizedEmail)) {
+      console.log(`[AUDIT] Account locked due to failed logins: ${sanitizedEmail}`);
       return res.status(403).json({
         success: false,
         message: "Account locked due to too many failed login attempts. Try again later."
@@ -108,20 +183,27 @@ const loginUser = async (req, res) => {
       });
     }
 
-    const checkPasswordMatch = await bcrypt.compare(
-      password,
-      checkUser.password
-    );
+    const checkPasswordMatch = await bcrypt.compare(password, checkUser.password);
     if (!checkPasswordMatch) {
-      recordFailedLogin(email);
-      console.log(`[AUDIT] Failed login (bad password) for: ${email}`);
+      recordFailedLogin(sanitizedEmail);
+      checkUser.failedLoginAttempts = (checkUser.failedLoginAttempts || 0) + 1;
+      if (checkUser.failedLoginAttempts >= MAX_FAILED_ATTEMPTS) {
+        checkUser.lockoutUntil = Date.now() + LOCKOUT_TIME;
+      }
+      await checkUser.save();
+      console.log(`[AUDIT] Failed login (bad password) for: ${sanitizedEmail}`);
       return res.status(400).json({
         success: false,
         message: "Incorrect password! Please try again",
       });
     }
 
-    resetFailedLogins(email);
+    // Reset failed attempts on successful login
+    checkUser.failedLoginAttempts = 0;
+    checkUser.lockoutUntil = null;
+    await checkUser.save();
+    resetFailedLogins(sanitizedEmail);
+
     const token = generateToken(checkUser);
     const isProd = process.env.NODE_ENV === 'production';
     res.cookie("token", token, {
@@ -138,7 +220,8 @@ const loginUser = async (req, res) => {
         userName: checkUser.userName,
       },
     });
-    console.log(`[AUDIT] Successful login: ${email}`);
+
+    console.log(`[AUDIT] Successful login: ${sanitizedEmail}`);
   } catch (e) {
     console.log(e);
     res.status(500).json({
@@ -148,12 +231,13 @@ const loginUser = async (req, res) => {
   }
 };
 
-// Google OAuth Callback
+// =========================
+// OAuth Callbacks
+// =========================
 const googleAuthCallback = async (req, res) => {
   try {
     const user = req.user;
     const token = generateToken(user);
-
     const isProd = process.env.NODE_ENV === 'production';
     res.cookie("token", token, {
       httpOnly: true,
@@ -161,7 +245,6 @@ const googleAuthCallback = async (req, res) => {
       sameSite: isProd ? 'strict' : 'lax',
       maxAge: 60 * 60 * 1000 // 1 hour
     });
-
     res.redirect("http://localhost:5173");
   } catch (error) {
     console.error("Google OAuth callback error:", error);
@@ -169,12 +252,10 @@ const googleAuthCallback = async (req, res) => {
   }
 };
 
-// Facebook OAuth Callback
 const facebookAuthCallback = async (req, res) => {
   try {
     const user = req.user;
     const token = generateToken(user);
-
     const isProd = process.env.NODE_ENV === 'production';
     res.cookie("token", token, {
       httpOnly: true,
@@ -182,7 +263,6 @@ const facebookAuthCallback = async (req, res) => {
       sameSite: isProd ? 'strict' : 'lax',
       maxAge: 60 * 60 * 1000 // 1 hour
     });
-
     res.redirect("http://localhost:5173");
   } catch (error) {
     console.error("Facebook OAuth callback error:", error);
@@ -190,7 +270,9 @@ const facebookAuthCallback = async (req, res) => {
   }
 };
 
-// Get current user (for OAuth)
+// =========================
+// Get Current Authenticated User
+// =========================
 const getCurrentUser = (req, res) => {
   const user = req.user;
   res.status(200).json({
@@ -205,7 +287,9 @@ const getCurrentUser = (req, res) => {
   });
 };
 
-// Logout
+// =========================
+// Logout User
+// =========================
 const logoutUser = (req, res) => {
   const token = req.cookies.token;
   if (token) {
@@ -218,7 +302,9 @@ const logoutUser = (req, res) => {
   });
 };
 
-// Auth middleware
+// =========================
+// Auth Middleware
+// =========================
 const authMiddleware = async (req, res, next) => {
   const token = req.cookies.token;
   if (!token) {
