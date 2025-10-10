@@ -9,6 +9,8 @@ const {
 } = require("../../controllers/admin/products-controller");
 
 const { upload } = require("../../helpers/cloudinary");
+const { adminOnly } = require("../../middleware/roleCheck");
+const { authMiddleware } = require("../../controllers/auth/auth-controller");
 
 // WHY: Admin routes are completely unprotected, allowing anyone to add/edit/delete products
 // HOW: Import authMiddleware and apply it to all admin routes
